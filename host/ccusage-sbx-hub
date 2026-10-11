@@ -35,9 +35,9 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 act() { if [ "$DRY_RUN" = 1 ]; then printf '[dry run] %s\n' "$*"; else "$@"; fi; }
 
 need_binary() {
-  [ -x "$BIN" ] || die "no ccusage at $BIN. Build one with scripts/build-host-binary.sh, or set CCUSAGE_SBX_BIN."
+  [ -x "$BIN" ] || die "no ccusage at $BIN. Run scripts/install-host-binary.sh (or scripts/build-host-binary.sh), or set CCUSAGE_SBX_BIN."
   "$BIN" sync serve --help >/dev/null 2>&1 \
-    || die "$BIN has no 'sync serve'. The published ccusage does not; build the fork with scripts/build-host-binary.sh."
+    || die "$BIN has no 'sync serve'. The published ccusage does not; run scripts/install-host-binary.sh to get the fork build."
 }
 
 make_token() {

@@ -1,7 +1,7 @@
 name: Build and publish ccusage binaries
 
-# Builds the static Linux ccusage binaries the kit installs, from the commit named in fork.lock, and
-# publishes them as a GitHub release with a checksum file and a build provenance attestation. Run it by hand;
+# Builds the ccusage binaries this project installs, from the commit named in fork.lock: static Linux ones (the
+# sandboxes, and Linux hosts) and macOS ones (macOS hosts), and publishes them as a GitHub release with a checksum file and a build provenance attestation. Run it by hand;
 # nothing here fires on its own. Afterwards run scripts/pin-release.sh <tag> and commit what it changes:
 # that is what makes the kit install these exact bytes.
 
@@ -72,8 +72,65 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-host:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: darwin-arm64, runner: macos-15 }
+          - { target: darwin-x64, runner: macos-15-intel }
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "12.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read fork.lock
+        run: |
+          grep -E '^[A-Z_]+=[A-Za-z0-9/._-]+$' fork.lock >> "$GITHUB_ENV"
+          for v in FORK_REPO FORK_COMMIT PRICES_REPO PRICES_COMMIT; do
+            grep -q "^$v=" fork.lock || { echo "fork.lock has no $v" >&2; exit 1; }
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.FORK_REPO }}
+          ref: ${{ env.FORK_COMMIT }}
+          path: fork
+          persist-credentials: false
+
+      - name: Fetch the pinned model prices
+        run: |
+          mkdir -p "$RUNNER_TEMP/cache"
+          curl -fsSL -o "$RUNNER_TEMP/cache/model_prices.json" \
+            "https://raw.githubusercontent.com/${PRICES_REPO}/${PRICES_COMMIT}/model_prices_and_context_window.json"
+          shasum -a 256 "$RUNNER_TEMP/cache/model_prices.json"
+
+      - name: Build
+        env:
+          CCUSAGE_SBX_BIN: ${{ runner.temp }}/out/ccusage-${{ matrix.target }}
+          CCUSAGE_SBX_BUILD_CACHE: ${{ runner.temp }}/cache
+        run: scripts/build-host-binary.sh fork
+
+      - name: Smoke test
+        run: |
+          "$RUNNER_TEMP/out/ccusage-${{ matrix.target }}" --version
+          "$RUNNER_TEMP/out/ccusage-${{ matrix.target }}" sync serve --help >/dev/null
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ccusage-${{ matrix.target }}
+          path: ${{ runner.temp }}/out/ccusage-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
   release:
-    needs: build
+    needs: [build, build-host]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -96,12 +153,12 @@ jobs:
         run: |
           cd dist
           chmod +x ccusage-linux-*
-          sha256sum ccusage-linux-arm64 ccusage-linux-x64 > SHA256SUMS
+          sha256sum ccusage-linux-arm64 ccusage-linux-x64 ccusage-darwin-arm64 ccusage-darwin-x64 > SHA256SUMS
           cat > BUILD-INFO <<INFO
           ccusage fork:  https://github.com/${FORK_REPO}
           commit:        ${FORK_COMMIT}
           prices:        https://github.com/${PRICES_REPO}/blob/${PRICES_COMMIT}/model_prices_and_context_window.json
-          toolchain:     rust:1.97-alpine (static musl)
+          toolchain:     Linux: rust:1.97-alpine (static musl); macOS: the fork's rust-toolchain.toml on the runner
           kit commit:    ${GITHUB_SHA}
           workflow run:  ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           INFO
@@ -112,6 +169,8 @@ jobs:
           subject-path: |
             dist/ccusage-linux-arm64
             dist/ccusage-linux-x64
+            dist/ccusage-darwin-arm64
+            dist/ccusage-darwin-x64
 
       - name: Publish the release
         env:
@@ -120,8 +179,8 @@ jobs:
         run: |
           tag="${INPUT_TAG:-binaries-${FORK_COMMIT:0:8}}"
           case "$tag" in *[!A-Za-z0-9._-]*|"") echo "bad tag '$tag'" >&2; exit 1 ;; esac
-          gh release create "$tag" dist/ccusage-linux-arm64 dist/ccusage-linux-x64 dist/SHA256SUMS dist/BUILD-INFO \
+          gh release create "$tag" dist/ccusage-linux-arm64 dist/ccusage-linux-x64 dist/ccusage-darwin-arm64 dist/ccusage-darwin-x64 dist/SHA256SUMS dist/BUILD-INFO \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "ccusage binaries $tag" \
-            --notes "Static Linux binaries of the ccusage fork at ${FORK_REPO}@${FORK_COMMIT}. Pin them with scripts/pin-release.sh $tag. See BUILD-INFO and SHA256SUMS."
+            --notes "Binaries of the ccusage fork (static Linux for sandboxes and Linux hosts, macOS for macOS hosts) at ${FORK_REPO}@${FORK_COMMIT}. Pin them with scripts/pin-release.sh $tag. See BUILD-INFO and SHA256SUMS."
           echo "Released $tag. Next: scripts/pin-release.sh $tag" >> "$GITHUB_STEP_SUMMARY"

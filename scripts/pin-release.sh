@@ -10,16 +10,17 @@ REPO="${2:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 KIT="$HERE/ccusage-kit/files/home/.local/share/ccusage-sbx"
 
+FILES="ccusage-linux-arm64 ccusage-linux-x64 ccusage-darwin-arm64 ccusage-darwin-x64"
 sums="$(gh release download "$TAG" --repo "$REPO" --pattern SHA256SUMS --output -)"
-for f in ccusage-linux-arm64 ccusage-linux-x64; do
+for f in $FILES; do
   echo "$sums" | grep -Eq "^[0-9a-f]{64}  $f\$" || { echo "release $TAG has no checksum for $f" >&2; exit 1; }
 done
 
 # The checksums come from the release itself, so check the release's attestation says the workflow built them.
 if [ -z "${SKIP_ATTESTATION:-}" ]; then
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-  gh release download "$TAG" --repo "$REPO" --pattern 'ccusage-linux-*' --dir "$tmp"
-  for f in ccusage-linux-arm64 ccusage-linux-x64; do
+  gh release download "$TAG" --repo "$REPO" --pattern 'ccusage-*' --dir "$tmp"
+  for f in $FILES; do
     want="$(echo "$sums" | awk -v f="$f" '$2==f{print $1}')"
     [ "$(shasum -a 256 "$tmp/$f" | cut -d' ' -f1)" = "$want" ] || { echo "$f does not match SHA256SUMS" >&2; exit 1; }
     gh attestation verify "$tmp/$f" --repo "$REPO" >/dev/null || { echo "no valid attestation for $f" >&2; exit 1; }
