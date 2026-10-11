@@ -96,6 +96,9 @@ host/ccusage-sbx-hub dashboard --open     # overall and per-sandbox
 host/ccusage-sbx-hub status               # is the hub up, how many sandboxes have synced
 ```
 
+To get a `ccusage-sbx-dashboard` command on your PATH that does the first of those, run
+`scripts/install-command.sh` (it writes a small wrapper into `~/.local/bin`; `--uninstall` removes it).
+
 ## The dashboard
 
 `host/ccusage-sbx-hub dashboard --open` serves a page that you can filter and drill into, all on your machine.
@@ -268,7 +271,7 @@ ccusage-kit/                  the sbx kit (mixin)
     install-hooks.sh          registers the agent hooks (Claude Code, Codex, Gemini, Copilot), idempotently
     sync-now.sh               the hook itself: tells the loop to sync, and returns at once
 host/ccusage-sbx-hub          install / run / status / flush / dashboard on the host
-scripts/                      build the binaries, pin a release, build the host binary
+scripts/                      build the binaries, pin a release, build the host binary, install the dashboard command
 .github/workflows/            builds and publishes the binaries
 fork.lock                     the fork and price-file commits the binaries are built from
 tests/                        end-to-end checks against real sandboxes, and the dashboard in a browser
