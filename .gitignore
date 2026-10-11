@@ -1,0 +1,6 @@
+.build/
+node_modules/
+tests/dashboard/out/
+# Locally built binaries, for trying the kit before a release. The ones users get come from the build workflow.
+ccusage-kit/files/home/.local/share/ccusage-sbx/ccusage-linux-*
+ccusage-kit/files/home/.local/share/ccusage-sbx/*.local

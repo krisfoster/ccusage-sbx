@@ -1,0 +1,10 @@
+# What the kit's binaries are built from. The build workflow reads this file, so changing a line here and
+# running the workflow is how the binaries are updated. Nothing else decides what gets built.
+#
+# FORK_COMMIT must be on FORK_REPO on GitHub: the workflow checks it out by commit, not by branch, so a
+# build always says exactly what it came from.
+FORK_REPO=krisfoster/ccusage
+FORK_COMMIT=eeeb8a467d06dc8635237a5f5fbab7befac0fb76
+# Prices are compiled into the binary. Pinning the file is what makes two builds of the same commit the same.
+PRICES_REPO=BerriAI/litellm
+PRICES_COMMIT=5390199d637e78324e6a0181faa0e31fb44ec053

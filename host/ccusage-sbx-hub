@@ -1,0 +1,241 @@
+#!/bin/bash
+# Runs and manages the ccusage hub that Docker sandboxes sync into.
+#
+#   install     create the token, the data directory and the host config, start the hub at login,
+#               and register the token with sbx so sandboxes can authenticate without ever seeing it
+#   uninstall   stop the hub, remove the service and the sbx secret (the data is kept)
+#   status      is the hub running, and what does it hold
+#   run         run the hub in the foreground (what the service runs)
+#   flush       sync the sandboxes you name now, or every running one with --all; do this before 'sbx rm'
+#   machines    list the sandboxes that have synced, and which have gone quiet (retired)
+#   dashboard   open the local dashboard over everything the sandboxes synced
+#   doctor | repair   the matching 'ccusage sync' command, pointed at the hub's data
+#
+# Settings (environment): CCUSAGE_SBX_DIR, CCUSAGE_SBX_PORT, CCUSAGE_SBX_BIN,
+# CCUSAGE_SBX_TOKEN_FILE, CCUSAGE_SBX_PLACEHOLDER. Defaults are below.
+set -euo pipefail
+
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+DATA_ROOT="${CCUSAGE_SBX_DIR:-$HOME/.ccusage-sbx}"
+DATA_DIR="$DATA_ROOT/data"
+CONFIG="$DATA_ROOT/ccusage.json"
+PORT="${CCUSAGE_SBX_PORT:-8777}"
+BIN="${CCUSAGE_SBX_BIN:-$HOME/.local/share/ccusage-sbx/bin/ccusage}"
+TOKEN_FILE="${CCUSAGE_SBX_TOKEN_FILE:-$HOME/.config/ccusage-sbx/hub-token}"
+PLACEHOLDER="${CCUSAGE_SBX_PLACEHOLDER:-ccusage-hub-token}"
+LABEL="com.docker.ccusage-sbx-hub"
+LOG="$DATA_ROOT/hub.log"
+DRY_RUN=0
+SKIP_SERVICE=0
+SKIP_SECRET=0
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# In a dry run, commands that would change something are printed instead of run.
+act() { if [ "$DRY_RUN" = 1 ]; then printf '[dry run] %s\n' "$*"; else "$@"; fi; }
+
+need_binary() {
+  [ -x "$BIN" ] || die "no ccusage at $BIN. Build one with scripts/build-host-binary.sh, or set CCUSAGE_SBX_BIN."
+  "$BIN" sync serve --help >/dev/null 2>&1 \
+    || die "$BIN has no 'sync serve'. The published ccusage does not; build the fork with scripts/build-host-binary.sh."
+}
+
+make_token() {
+  [ -s "$TOKEN_FILE" ] && return 0
+  say "creating a bearer token at $TOKEN_FILE"
+  if [ "$DRY_RUN" = 1 ]; then say "[dry run] would write 64 random hex characters, mode 600"; return 0; fi
+  mkdir -p "$(dirname "$TOKEN_FILE")"
+  ( umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$TOKEN_FILE" )
+  chmod 600 "$TOKEN_FILE"
+}
+
+write_config() {
+  # A config of its own, so the person's own ccusage.json is never touched.
+  if [ "$DRY_RUN" = 1 ]; then say "[dry run] would write $CONFIG"; return 0; fi
+  mkdir -p "$DATA_DIR"
+  chmod 700 "$DATA_ROOT"
+  printf '{\n  "sync": { "provider": "fs", "dir": "%s" }\n}\n' "$DATA_DIR" > "$CONFIG"
+}
+
+plist_path() { echo "$HOME/Library/LaunchAgents/$LABEL.plist"; }
+unit_path() { echo "$HOME/.config/systemd/user/ccusage-sbx-hub.service"; }
+
+plist_text() {
+  cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array><string>$SELF</string><string>run</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>CCUSAGE_SBX_DIR</key><string>$DATA_ROOT</string>
+    <key>CCUSAGE_SBX_PORT</key><string>$PORT</string>
+    <key>CCUSAGE_SBX_BIN</key><string>$BIN</string>
+    <key>CCUSAGE_SBX_TOKEN_FILE</key><string>$TOKEN_FILE</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict>
+</plist>
+PLIST
+}
+
+unit_text() {
+  cat <<UNIT
+[Unit]
+Description=ccusage hub for Docker sandboxes
+
+[Service]
+ExecStart=$SELF run
+Environment=CCUSAGE_SBX_DIR=$DATA_ROOT CCUSAGE_SBX_PORT=$PORT CCUSAGE_SBX_BIN=$BIN CCUSAGE_SBX_TOKEN_FILE=$TOKEN_FILE
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+UNIT
+}
+
+install_service() {
+  case "$(uname -s)" in
+    Darwin)
+      local plist; plist="$(plist_path)"
+      if [ "$DRY_RUN" = 1 ]; then
+        say "[dry run] would write $plist:"; plist_text | sed 's/^/    /'
+        say "[dry run] launchctl bootstrap gui/$(id -u) $plist"; return 0
+      fi
+      mkdir -p "$(dirname "$plist")"; plist_text > "$plist"
+      plutil -lint "$plist" >/dev/null
+      launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+      launchctl bootstrap "gui/$(id -u)" "$plist"
+      ;;
+    Linux)
+      local unit; unit="$(unit_path)"
+      if [ "$DRY_RUN" = 1 ]; then
+        say "[dry run] would write $unit:"; unit_text | sed 's/^/    /'
+        say "[dry run] systemctl --user enable --now ccusage-sbx-hub"; return 0
+      fi
+      mkdir -p "$(dirname "$unit")"; unit_text > "$unit"
+      systemctl --user daemon-reload
+      systemctl --user enable --now ccusage-sbx-hub
+      ;;
+    *) say "no service support for $(uname -s); run '$SELF run' yourself" ;;
+  esac
+}
+
+remove_service() {
+  case "$(uname -s)" in
+    Darwin)
+      launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+      act rm -f "$(plist_path)" ;;
+    Linux)
+      systemctl --user disable --now ccusage-sbx-hub 2>/dev/null || true
+      act rm -f "$(unit_path)" ;;
+  esac
+}
+
+register_secret() {
+  command -v sbx >/dev/null || { say "sbx not found; skipping the secret. Register it later with:"; print_secret_command; return 0; }
+  say "registering the hub token with sbx (sandboxes see only the placeholder '$PLACEHOLDER')"
+  # The proxy sees the request after rewriting host.docker.internal to localhost, so that is the
+  # host the secret has to name. Ports are not accepted here.
+  act sbx secret set-custom --host localhost --env CCUSAGE_SYNC_TOKEN \
+    --placeholder "$PLACEHOLDER" --command "/bin/cat $TOKEN_FILE"
+}
+
+print_secret_command() {
+  say "  sbx secret set-custom --host localhost --env CCUSAGE_SYNC_TOKEN --placeholder $PLACEHOLDER --command '/bin/cat $TOKEN_FILE'"
+}
+
+cmd_install() {
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) DRY_RUN=1 ;;
+      --skip-service) SKIP_SERVICE=1 ;;
+      --skip-secret) SKIP_SECRET=1 ;;
+      *) die "unknown option $arg" ;;
+    esac
+  done
+  need_binary
+  make_token
+  write_config
+  [ "$SKIP_SERVICE" = 1 ] || install_service
+  [ "$SKIP_SECRET" = 1 ] || register_secret
+  say ""
+  say "Done. Create sandboxes with the kit:  sbx create claude . --kit ./ccusage-kit"
+  [ "$DRY_RUN" = 1 ] || say "Hub: http://127.0.0.1:$PORT   data: $DATA_DIR   view: $SELF dashboard"
+}
+
+cmd_uninstall() {
+  for arg in "$@"; do [ "$arg" = --dry-run ] && DRY_RUN=1; done
+  remove_service
+  if command -v sbx >/dev/null; then act sbx secret rm --placeholder "$PLACEHOLDER" -f || true; fi
+  say "Removed the service and the sbx secret. Your data is still in $DATA_DIR, and the token in $TOKEN_FILE."
+}
+
+cmd_run() {
+  need_binary
+  [ -s "$TOKEN_FILE" ] || die "no token at $TOKEN_FILE; run '$SELF install' first"
+  mkdir -p "$DATA_DIR"
+  exec "$BIN" sync serve --dir "$DATA_DIR" --listen "127.0.0.1:$PORT" --token-file "$TOKEN_FILE"
+}
+
+cmd_status() {
+  need_binary
+  if [ -s "$TOKEN_FILE" ] && out="$(curl -fsS -m 3 -H "Authorization: Bearer $(cat "$TOKEN_FILE")" "http://127.0.0.1:$PORT/v1/health" 2>&1)"; then
+    say "hub: running on 127.0.0.1:$PORT ($out)"
+  else
+    say "hub: NOT reachable on 127.0.0.1:$PORT"
+  fi
+  command -v sbx >/dev/null && { sbx secret ls 2>/dev/null | grep -q "$PLACEHOLDER" && say "sbx secret: registered" || say "sbx secret: NOT registered"; }
+  [ -f "$CONFIG" ] && "$BIN" sync status --config "$CONFIG" || true
+  if [ -d "$DATA_DIR" ]; then
+    say "machines that have synced: $(find "$DATA_DIR" -path '*/machines/*/machine.json' 2>/dev/null | wc -l | tr -d ' ')"
+  fi
+}
+
+# 'sbx stop' gives the sandbox's sync loop no chance to run a last sync, so usage from the final few
+# minutes can still be waiting inside a sandbox. A sandbox that is stopped and later started catches up on
+# its own; one that is removed does not. Flushing first closes that window.
+cmd_flush() {
+  command -v sbx >/dev/null || die "sbx not found"
+  local targets=() name failed=0
+  if [ "${1:-}" = "--all" ]; then
+    while IFS= read -r name; do targets+=("$name"); done < <(sbx ls 2>/dev/null | awk 'NR > 1 && $3 == "running" { print $1 }')
+  else
+    targets=("$@")
+  fi
+  # Naming sandboxes is the default so that sandboxes that have nothing to do with ccusage are never
+  # touched; '--all' still skips any that were not created with the kit.
+  [ ${#targets[@]} -gt 0 ] || die "name the sandboxes to flush, or use --all for every running one"
+  for name in "${targets[@]}"; do
+    if ! sbx exec "$name" sh -c 'test -s "$HOME/.local/state/ccusage-sbx/ccusage.json"' 2>/dev/null; then
+      say "$name: not set up for ccusage sync, skipped"; continue
+    fi
+    if sbx exec "$name" sh -c 'ccusage sync run --config "$HOME/.local/state/ccusage-sbx/ccusage.json"' >/dev/null 2>&1; then
+      say "$name: synced"
+    else
+      say "$name: sync failed (is the hub running? try: $SELF status)"; failed=1
+    fi
+  done
+  return $failed
+}
+
+sync_cmd() { need_binary; [ -f "$CONFIG" ] || die "no $CONFIG; run '$SELF install' first"; exec "$BIN" sync "$@" --config "$CONFIG"; }
+
+case "${1:-}" in
+  install) shift; cmd_install "$@" ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
+  run) cmd_run ;;
+  status) cmd_status ;;
+  flush) shift; cmd_flush "$@" ;;
+  machines) shift; sync_cmd machines "$@" ;;
+  dashboard) shift; sync_cmd dashboard "$@" ;;
+  doctor) shift; sync_cmd doctor "$@" ;;
+  repair) shift; sync_cmd repair "$@" ;;
+  *) sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac
