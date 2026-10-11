@@ -25,51 +25,93 @@ store.
 ## Requirements
 
 - Docker Sandboxes (`sbx`).
-- A Rust toolchain, to build ccusage for your host. The published ccusage has no `sync serve`, so the host and the
-  sandboxes both run a build of the [fork](https://github.com/krisfoster/ccusage) on branch
-  `feat/local-sync-provider`. Check the fork out next to this repository.
-- Docker, only if you want to build the sandbox binaries yourself. The kit downloads published ones (see below).
-- macOS or Linux host. Only macOS on Apple silicon has been tested.
+- A macOS or Linux computer (arm64 or x64), with `bash` and `curl`. Nothing else: the host program is downloaded, not
+  built, so no Rust or Docker is needed.
+- Network access to `github.com` from the computer (to download) and from each sandbox when it is created.
 
 ## Set up
 
-```bash
-# 1. Get the host tooling and the fork it is built from, side by side.
-git clone https://github.com/krisfoster/ccusage-sbx.git
-git clone --branch feat/local-sync-provider https://github.com/krisfoster/ccusage.git
-cd ccusage-sbx
+Do the steps in this order. The hub has to exist, with its token registered with sbx, before the first sandbox is
+created.
 
-# 2. Build ccusage for this machine (the hub and the dashboard run from it).
-scripts/build-host-binary.sh ../ccusage
-
-# 3. Create the token, start the hub at login, and register the token with sbx.
-host/ccusage-sbx-hub install         # try it first with --dry-run
-
-# 4. Create sandboxes with the kit, straight from git.
-sbx create claude . --kit "git+https://github.com/krisfoster/ccusage-sbx.git#dir=ccusage-kit"
-```
-
-Use the URL of wherever you host this repository. To pin a version, name a commit:
-`#ref=<commit>&dir=ccusage-kit`. From a clone you can use `--kit ./ccusage-kit` instead.
-
-sbx can restrict which sources a kit may come from (`sbx settings get kit.allowedSources`). A default install allows
-Docker's own, so if sbx refuses the URL above and names `kit.allowedSources`, add the prefix of your repository,
-keeping what is already there:
+**1. Let sbx load the kit from this repository (once).** sbx only loads kits from sources it has been told to trust
+(`sbx settings get kit.allowedSources`). Add this repository's prefix, keeping what is already there:
 
 ```bash
 sbx settings set kit.allowedSources '["docker.io/","github.com/docker/","github.com/krisfoster/"]'
 ```
 
-If your organisation manages that setting, ask for the prefix to be added, or use a clone and `--kit ./ccusage-kit`.
-Only `https` and `ssh` git references are accepted, not `git+file` or `git+http`.
+If your organisation manages that setting, ask for the prefix to be added, or use a clone with `--kit ./ccusage-kit`
+in step 5. Without it, sbx refuses the kit and says so, naming `kit.allowedSources`.
 
-The kit only works when a sandbox is created. `sbx kit add` refuses kits that have startup commands, so an
-existing sandbox has to be recreated to get it.
+**2. Get this repository.** The host tooling (the `host/` and `scripts/` directories) runs from a clone.
+
+```bash
+git clone https://github.com/krisfoster/ccusage-sbx.git
+cd ccusage-sbx
+```
+
+**3. Install the host program.** `scripts/install-host-binary.sh` downloads the `ccusage` build for this computer
+(macOS or Linux, arm64 or x64) from the release this checkout pins, refuses it unless its SHA-256 matches the
+committed one, and puts it in `~/.local/share/ccusage-sbx/bin/`. The published ccusage cannot run a hub, so this
+build of the [fork](https://github.com/krisfoster/ccusage) is needed on the host as well as in the sandboxes. To build
+it from source instead, `scripts/build-host-binary.sh <path-to-fork>` (needs Rust).
+
+```bash
+scripts/install-host-binary.sh
+```
+
+**4. Start the hub.** This creates a random token (`~/.config/ccusage-sbx/hub-token`, readable only by you), a data
+directory (`~/.ccusage-sbx`), starts the hub now and at every login, and registers the token with sbx so that
+sandboxes can use it without ever seeing it. Run it with `--dry-run` first to see exactly what it would do.
+
+```bash
+host/ccusage-sbx-hub install
+```
+
+The hub listens on `127.0.0.1:8777`, so only this computer can reach it. If that port is taken, set
+`CCUSAGE_SBX_PORT=<port>` for this step and pass `--kit-arg hub-port=<port>` in step 5.
+
+- **macOS:** it runs as a launchd agent (`~/Library/LaunchAgents/com.docker.ccusage-sbx-hub.plist`).
+- **Linux:** it runs as a systemd user service (`~/.config/systemd/user/ccusage-sbx-hub.service`). To keep it
+  running when you are not logged in, run `loginctl enable-linger "$USER"`. Without systemd, run
+  `host/ccusage-sbx-hub run` yourself, in a terminal or under whatever you use to supervise processes; the
+  `--skip-service` option leaves the service out.
+
+**5. Create sandboxes with the kit.** Any agent; the kit is a mixin.
+
+```bash
+sbx create claude . --kit "git+https://github.com/krisfoster/ccusage-sbx.git#dir=ccusage-kit"
+```
+
+To pin a version, name a commit: `#ref=<commit>&dir=ccusage-kit`. From a clone, `--kit ./ccusage-kit` works too. The
+kit only works when a sandbox is created: `sbx kit add` refuses kits that have startup commands, so an existing
+sandbox has to be recreated to get it. When it is created, the sandbox downloads and checks its `ccusage` (see
+below), then starts syncing.
+
+**6. Check that it works.** A sandbox syncs a few minutes after it starts, and again as soon as an agent finishes a
+turn.
+
+```bash
+host/ccusage-sbx-hub status               # hub reachable? secret registered? how many sandboxes have synced?
+host/ccusage-sbx-hub flush <sandbox>      # don't want to wait: sync that sandbox now
+host/ccusage-sbx-hub dashboard --open     # overall and per-sandbox usage, in your browser
+```
+
+The dashboard has nothing to show until one sandbox has synced; until then it says so. If `status` does not show
+the hub as reachable or a sandbox never appears, see Troubleshooting.
+
+**7. Optional: a command for the dashboard.** `scripts/install-command.sh` writes a `ccusage-sbx-dashboard` command
+into `~/.local/bin` that opens the dashboard (`--uninstall` removes it).
+
+Everything stays on your computer. Nothing is sent to a cloud service or bucket: the hub stores its data as
+ordinary files under `~/.ccusage-sbx/data`.
 
 ### The binaries in the kit
 
 The sandbox needs a `ccusage` that can sync, and the published one cannot, so the kit installs a static build of the
-fork (Linux arm64 and x64). When a sandbox is created, `install.sh` downloads the build named in
+fork (Linux arm64 and x64). The same release also holds the macOS builds and the Linux ones that step 3 installs on
+the host. When a sandbox is created, `install.sh` downloads the build named in
 `ccusage-kit/files/home/.local/share/ccusage-sbx/release.env` from this repository's GitHub releases, and runs it only
 if its SHA-256 matches `SHA256SUMS` in the same directory. Both files are committed, so a given version of the kit
 installs exactly one set of bytes, whatever is on the release page later. This needs the sandbox to reach `github.com`
@@ -88,16 +130,6 @@ git add -A ccusage-kit && git commit
 To try a change without a release, `scripts/build-binaries.sh` builds into the kit directory (git ignores the
 result), and `install.sh` uses it, checked against `SHA256SUMS.local`. `binary-url` and `binary-sha256` kit arguments
 install a binary from anywhere else, still checked.
-
-Usage appears on the host a few minutes after an agent has done something. Look at it with:
-
-```bash
-host/ccusage-sbx-hub dashboard --open     # overall and per-sandbox
-host/ccusage-sbx-hub status               # is the hub up, how many sandboxes have synced
-```
-
-To get a `ccusage-sbx-dashboard` command on your PATH that does the first of those, run
-`scripts/install-command.sh` (it writes a small wrapper into `~/.local/bin`; `--uninstall` removes it).
 
 ## The dashboard
 
@@ -243,8 +275,12 @@ The first command leaves your data in place on purpose. The last three are what 
 
 - A restrictive sbx network policy. The kit declares `host.docker.internal:<port>`, and it validates, but it was
   only exercised under the permissive policy on the development machine.
-- Linux hosts, and `host/ccusage-sbx-hub install` as a real launchd or systemd service (checked with `--dry-run`
-  and `plutil -lint` only).
+- Linux hosts with sbx. The hub script was exercised on Linux in a Debian container (install, run, status, doctor, the
+  systemd unit it would write), but not as a real systemd service, and no sandboxes were synced into it from Linux.
+  macOS Apple silicon is the only platform run end to end. The Intel macOS and Linux x64 binaries were built and
+  pinned but never run.
+- `host/ccusage-sbx-hub install` as a real launchd service at login (checked with `--dry-run` and `plutil -lint`; the
+  hub itself was run in the foreground).
 - Cloud sandboxes (`sbx --cloud`).
 
 ## Tests
@@ -271,7 +307,7 @@ ccusage-kit/                  the sbx kit (mixin)
     install-hooks.sh          registers the agent hooks (Claude Code, Codex, Gemini, Copilot), idempotently
     sync-now.sh               the hook itself: tells the loop to sync, and returns at once
 host/ccusage-sbx-hub          install / run / status / flush / dashboard on the host
-scripts/                      build the binaries, pin a release, build the host binary, install the dashboard command
+scripts/                      install the host binary, build binaries, pin a release, install the dashboard command
 .github/workflows/            builds and publishes the binaries
 fork.lock                     the fork and price-file commits the binaries are built from
 tests/                        end-to-end checks against real sandboxes, and the dashboard in a browser

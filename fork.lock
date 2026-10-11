@@ -5,6 +5,7 @@
 # build always says exactly what it came from.
 FORK_REPO=krisfoster/ccusage
 FORK_COMMIT=eeeb8a467d06dc8635237a5f5fbab7befac0fb76
-# Prices are compiled into the binary. Pinning the file is what makes two builds of the same commit the same.
+# Prices are compiled into the binary, so the file they come from is pinned too. (Two builds of one commit were not
+# byte-identical, so what the kit trusts is the checksum of a particular release, not the commit.)
 PRICES_REPO=BerriAI/litellm
 PRICES_COMMIT=5390199d637e78324e6a0181faa0e31fb44ec053

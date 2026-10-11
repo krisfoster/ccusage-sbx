@@ -237,12 +237,20 @@ Exit met: six simulated sandboxes set up and synced concurrently through one hub
 ### 3i. Binaries published from CI (2026-10-11)
 
 - Decision: build in GitHub Actions on native runners (`ubuntu-24.04-arm`, `ubuntu-24.04`), publish a GitHub release, and pin it by committing its SHA-256 sums. The binaries are no longer in git.
-- `fork.lock` names the fork commit and the LiteLLM price-file commit; the workflow builds exactly those, so a build can be repeated and says what it came from. Actions are pinned to commit SHAs. The workflow only runs by hand (`workflow_dispatch`).
+- `fork.lock` names the fork commit and the LiteLLM price-file commit; the workflow builds exactly those, so a build says exactly what it came from (builds of one commit are not byte-identical: the two Linux releases differ, hence the pin is on release checksums). Actions are pinned to commit SHAs. The workflow only runs by hand (`workflow_dispatch`).
 - The release carries `SHA256SUMS`, `BUILD-INFO` and a build provenance attestation. `scripts/pin-release.sh <tag>` verifies the attestation, then writes `SHA256SUMS` and `release.env` into the kit. A kit version therefore installs one set of bytes, even if someone later edits the release.
 - `install.sh` downloads from `release.env`, checks the checksum and refuses a mismatch. Local builds (`scripts/build-binaries.sh`) are git-ignored and used if present, checked against `SHA256SUMS.local`. `binary-url` and `binary-sha256` kit args install from elsewhere, still checked.
 - The kit now needs egress to `github.com` and GitHub's release content hosts at sandbox creation. Added to `permissions.network.allow` (not tested under a restrictive policy).
 - Tested locally: download over HTTP from the host with a matching checksum installs and runs; a wrong checksum fails sandbox creation with the mismatch message; an unpinned kit with no local binary fails with a clear message; `tests/e2e.sh` passes using local builds. 
 - Published 2026-10-11: fork branch pushed to `krisfoster/ccusage`, kit repo created public at `krisfoster/ccusage-sbx`. The first workflow run failed in the smoke test (a `chmod` on a root-owned file from Docker); the second passed and released `binaries-eeeb8a46`. `pin-release.sh` verified the attestations and pinned it. A sandbox created from the local directory with no local binaries downloaded from GitHub, and `sha256sum` of the installed binary equals the pinned arm64 sum. x64 was built and pinned but not run. Loading the kit over `git+https` is still untested: `kit.allowedSources` refuses `github.com/krisfoster/` until the user adds it.
+
+### 3j. Hub on macOS and Linux (2026-10-11)
+
+- The host no longer needs Rust: the workflow also builds `ccusage-darwin-arm64` and `ccusage-darwin-x64` on native macOS runners (`macos-15`, `macos-15-intel`, deployment target 12.0), and `scripts/install-host-binary.sh` downloads the right one for the host (the Linux hosts use the same static binaries as the sandboxes), checking the committed SHA-256. Release `binaries-eeeb8a46-2` holds all four; the arm64 macOS one was installed and run here.
+- The hub script was run on Linux in a Debian arm64 container: install, run, status, doctor and the systemd unit text. Not a real systemd service, and no sbx on Linux.
+- `host/ccusage-sbx-hub dashboard` now says so when nothing has synced, instead of the engine's error.
+- Observed: on this machine every new sandbox gets `git+https://github.com/krisfoster/ccusage-sbx.git#dir=ccusage-kit` applied by default (from some sbx-level configuration, not from this repo or the workspace). Passing `--kit` as well fails with "duplicate kit name ccusage-sync", which breaks `tests/e2e.sh` here until that default is removed. It also showed that loading the kit over `git+https` works end to end, including the release download.
+- Rewrote the README's set-up section as ordered steps with a verify step.
 
 ### Phase 2: The kit (DONE 2026-10-10, see section 3d)
 

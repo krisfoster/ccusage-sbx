@@ -234,7 +234,11 @@ case "${1:-}" in
   status) cmd_status ;;
   flush) shift; cmd_flush "$@" ;;
   machines) shift; sync_cmd machines "$@" ;;
-  dashboard) shift; sync_cmd dashboard "$@" ;;
+  dashboard)
+    shift
+    [ -n "$(find "$DATA_DIR" -path '*/machines/*/machine.json' 2>/dev/null | head -1)" ] \
+      || die "no sandbox has synced yet, so there is nothing to show. Create one with the kit, give it a few minutes (or run '$SELF flush <name>'), then try again."
+    sync_cmd dashboard "$@" ;;
   doctor) shift; sync_cmd doctor "$@" ;;
   repair) shift; sync_cmd repair "$@" ;;
   *) sed -n '2,15p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
