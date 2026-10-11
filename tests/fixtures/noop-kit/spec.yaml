@@ -1,0 +1,7 @@
+schemaVersion: "2"
+kind: mixin
+name: noop
+description: Does nothing but set a variable. Used to make sbx recreate a sandbox's container, so tests can check what survives.
+environment:
+  variables:
+    NOOP_KIT: "1"

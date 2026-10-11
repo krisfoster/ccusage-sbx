@@ -1,0 +1,6 @@
+{
+  "name": "ccusage-sbx-dashboard-tests",
+  "private": true,
+  "description": "Drives the ccusage dashboard in a real browser against fixture data.",
+  "dependencies": { "puppeteer-core": "^24.0.0" }
+}
