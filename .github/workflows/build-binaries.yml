@@ -62,7 +62,6 @@ jobs:
 
       - name: Smoke test
         run: |
-          chmod +x "$RUNNER_TEMP/out/ccusage-linux-${{ matrix.arch }}"
           "$RUNNER_TEMP/out/ccusage-linux-${{ matrix.arch }}" --version
           "$RUNNER_TEMP/out/ccusage-linux-${{ matrix.arch }}" sync --help >/dev/null
 
