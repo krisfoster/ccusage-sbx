@@ -293,6 +293,10 @@ tests/hooks.sh        # the agent hooks, with one tiny real request to each agen
 (cd tests/dashboard && npm install && node run.js)   # the dashboard in a real browser, against fixture data
 ```
 
+The sandbox tests pass `--kit ./ccusage-kit` themselves, from this checkout, and call the real `sbx` binary rather than
+any wrapper script on your PATH (for example one that adds a default kit to every `sbx create`). Set `SBX_REAL=<path>`
+to choose it.
+
 It runs its own hub on another port and uses secrets scoped to its own sandboxes, so it leaves nothing behind.
 
 ## Layout

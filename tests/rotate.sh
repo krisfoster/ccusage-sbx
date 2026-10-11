@@ -6,6 +6,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
+. "$HERE/tests/sbx-real.sh"
 PORT="${E2E_PORT:-18794}"
 BIN="${CCUSAGE_SBX_BIN:-$HOME/.local/share/ccusage-sbx/bin/ccusage}"
 WORK="$(mktemp -d)"
