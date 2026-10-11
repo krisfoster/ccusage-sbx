@@ -1,0 +1,77 @@
+schemaVersion: "2"
+kind: mixin
+name: ccusage-sync
+displayName: ccusage sync
+description: Runs ccusage inside the sandbox on a schedule, and as soon as an agent turn or session ends, and syncs the usage it finds to a hub on the host, so usage from every sandbox adds up in one place. Needs the host hub (host/ccusage-hub) and its token secret; see the kit README.
+
+args:
+  hub-port:
+    default: "8777"
+    description: "Port of the ccusage hub on the host (ccusage sync serve --listen 127.0.0.1:<port>)"
+    pattern: '^[0-9]{2,5}$'
+  sync-interval:
+    default: "300"
+    description: "Seconds between syncs. A random delay of up to a minute is added so sandboxes started together do not collide."
+    pattern: '^[0-9]{2,6}$'
+  project-names:
+    default: "plain"
+    description: "'plain' syncs each session's project path so the dashboard can name projects; 'hashed' replaces it with a salted hash. The data only goes to the hub on your own machine."
+    enum: ["plain", "hashed"]
+  agent-hooks:
+    default: "on"
+    description: "Register a hook with Claude Code and Codex so a finished turn syncs at once. 'off' leaves their settings alone and relies on the timer."
+    enum: ["on", "off"]
+  token-placeholder:
+    default: "ccusage-hub-token"
+    description: "The placeholder registered with 'sbx secret set-custom --placeholder'. The sandbox sends it; the sbx proxy swaps in the real hub token."
+    pattern: '^[A-Za-z0-9._-]{8,64}$'
+  binary-url:
+    default: ""
+    description: "Advanced. Install ccusage from this URL instead of the pinned release. Needs binary-sha256."
+    pattern: '^(https?://[^ ]+)?$'
+  binary-sha256:
+    default: ""
+    description: "Advanced. The SHA-256 of the file at binary-url. The binary is not installed if it does not match."
+    pattern: '^([0-9a-f]{64})?$'
+
+permissions:
+  network:
+    allow:
+      # The only egress the loop needs. The hub runs on the host, which the sandbox reaches by this name.
+      - "host.docker.internal:${{ kit.args.hub-port }}"
+      # Only used once, when the sandbox is created, to download the pinned ccusage binary from this
+      # repo's GitHub release (GitHub redirects release downloads to the two content hosts).
+      - "github.com:443"
+      - "objects.githubusercontent.com:443"
+      - "release-assets.githubusercontent.com:443"
+
+environment:
+  variables:
+    CCUSAGE_HUB_URL: "http://host.docker.internal:${{ kit.args.hub-port }}"
+    CCUSAGE_SYNC_INTERVAL: "${{ kit.args.sync-interval }}"
+    # Placeholder only. The real token never enters the sandbox: the proxy replaces this value in
+    # the request header on its way to the hub.
+    CCUSAGE_SYNC_TOKEN: "${{ kit.args.token-placeholder }}"
+    # Prices are embedded in the binary. Without this, ccusage would try to fetch them over the
+    # network, which the sandbox policy blocks.
+    CCUSAGE_OFFLINE: "1"
+    CCUSAGE_AGENT_HOOKS: "${{ kit.args.agent-hooks }}"
+    CCUSAGE_PROJECT_NAMES: "${{ kit.args.project-names }}"
+    CCUSAGE_BINARY_URL: "${{ kit.args.binary-url }}"
+    CCUSAGE_BINARY_SHA256: "${{ kit.args.binary-sha256 }}"
+
+setup:
+  install:
+    - command: sh /home/agent/.local/share/ccusage-sbx/install.sh
+      description: Download the ccusage binary that matches this architecture from the pinned release, and install it only if its checksum matches
+  startup:
+    - command:
+        - sh
+        - /home/agent/.local/share/ccusage-sbx/install-hooks.sh
+      description: Register the sync hook with the agents that have one, so a turn or session ending triggers a sync at once (idempotent; merges into the agent's own settings)
+    - command:
+        - setsid
+        - sh
+        - /home/agent/.local/share/ccusage-sbx/sync-loop.sh
+      background: true
+      description: Start the sync loop (a second copy exits at once, so restarts are safe)
