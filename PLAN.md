@@ -252,6 +252,13 @@ Exit met: six simulated sandboxes set up and synced concurrently through one hub
 - On this machine `~/.local/bin/sbx` is a wrapper (set up by the user in another session) that adds this kit to every `sbx create` and `sbx run`. Tests that pass `--kit` themselves hit "duplicate kit name ccusage-sync", so `tests/sbx-real.sh` makes them call the real sbx binary. The wrapper also showed that loading the kit over `git+https` works end to end, including the release download.
 - Rewrote the README's set-up section as ordered steps with a verify step.
 
+### 3k. Dashboard went stale (2026-10-12)
+
+- Report: a new sandbox (`claude-bedrock-demo`) ran a command and exited, and the dashboard did not show it. The hub had the data (`machines` listed the sandbox as synced today). The dashboard process had been started a day earlier and served the rollups it read at startup: `serve_locally` loaded them once. The comment next to `Cache-Control: no-store` said a later sync would show on reload, which was false.
+- Fix in the fork (`dc0105b8`): reload the store when the last read is over two seconds old, and keep the last good read if a reload fails. `tests/e2e.sh` now keeps a dashboard running across a flush and fails on the old binary (checked) and passes on the new one. Released as `binaries-dc0105b8` and pinned.
+- Still true: an open browser tab does not refresh itself; reload the page to see new usage.
+- To get the fix: `scripts/install-host-binary.sh`, then restart the hub and the dashboard. Sandboxes keep their old binary until recreated (the fix does not touch sandbox code).
+
 ### Phase 2: The kit (DONE 2026-10-10, see section 3d)
 
 Files are in this repo, uncommitted (this directory is not under version control yet).

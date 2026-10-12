@@ -1,5 +1,5 @@
-# Written by scripts/pin-release.sh binaries-eeeb8a46-2
-3826f6749dbd8097e9509ed3baaa1ec9c028a82cb4b06a06e165db2189a17afa  ccusage-linux-arm64
-1a5424435a0408f80d71c0a88562e06c79ad948c7c21c9b52e490a7e25f4d64f  ccusage-linux-x64
-c28146a1007740e5db0565f70b928a372696241ac705f5a6912a48357e435577  ccusage-darwin-arm64
-5b39f63c3a5074053b7556a359347d718d3e58c115c13e8f71da42f572f3d7e4  ccusage-darwin-x64
+# Written by scripts/pin-release.sh binaries-dc0105b8
+38d62ab045c6d69d0aed674a3a94d87ebd74bcadba39039bd7781a08aab95f22  ccusage-linux-arm64
+fd1b3f16a9f86cf631d7238f42e893f1a6126b411753a2dfe408d6b3e5423290  ccusage-linux-x64
+a24b606b34d1aed7c533688a200a55ee50178eab6474f0ee18b62b1154a4aaa3  ccusage-darwin-arm64
+3aa44ca819129564c332cdb976334f16b0299ab026b3a7bff8a91d100d411793  ccusage-darwin-x64
