@@ -4,7 +4,7 @@
 # FORK_COMMIT must be on FORK_REPO on GitHub: the workflow checks it out by commit, not by branch, so a
 # build always says exactly what it came from.
 FORK_REPO=krisfoster/ccusage
-FORK_COMMIT=eeeb8a467d06dc8635237a5f5fbab7befac0fb76
+FORK_COMMIT=dc0105b86b54470edf27ccf0ae2a598364956c8c
 # Prices are compiled into the binary, so the file they come from is pinned too. (Two builds of one commit were not
 # byte-identical, so what the kit trusts is the checksum of a particular release, not the commit.)
 PRICES_REPO=BerriAI/litellm

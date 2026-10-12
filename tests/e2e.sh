@@ -136,6 +136,15 @@ check "totals equal the sum of what the sandboxes were given (in out cw cr machi
   [ "$(totals)" = "$(expected 0)" ]
 check "the roster has $N machines" [ "$(find "$WORK/hub/data" -path '*/machines/*/machine.json' | wc -l | tr -d ' ')" = "$N" ]
 
+# Started now and left running, as a person's dashboard is: it must follow the store, not show a snapshot.
+"$HUB" dashboard > "$WORK/dash.log" 2>&1 &
+DASH_PID=$!
+for _ in $(seq 1 20); do grep -q "http://127.0.0.1:" "$WORK/dash.log" && break; sleep 0.5; done
+DASH_URL="$(grep -o 'http://127.0.0.1:[0-9]*' "$WORK/dash.log" | head -1)"
+json() { curl -s "$DASH_URL/data/$1.json"; }
+dashboard_out() { json daily | python3 -c "import json,sys; print(sum(r.get('out',0) for rows in json.load(sys.stdin)['days'].values() for r in rows if not r.get('suppressed')))"; }
+check "a dashboard started before the flush shows the totals so far" [ "$(dashboard_out)" = "$(expected 0 | cut -d' ' -f2)" ]
+
 say "== flush: add usage to the first sandbox, then flush it from the host"
 sbx exec "$PREFIX-0" sh -c 'cat > ~/.claude/projects/-work-demo/extra.jsonl' <<EOF
 {"type":"assistant","timestamp":"$(date -u -v-1d +%Y-%m-%dT12:00:00.000Z 2>/dev/null || date -u -d yesterday +%Y-%m-%dT12:00:00.000Z)","sessionId":"sess-extra","requestId":"req_extra","cwd":"/work/demo","version":"2.1.212","message":{"id":"msg_extra","role":"assistant","model":"claude-sonnet-4-5-20250929","usage":{"input_tokens":0,"output_tokens":777,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
@@ -143,6 +152,10 @@ EOF
 "$HUB" flush "$PREFIX-0"
 check "the flushed usage shows up on the host at once" \
   [ "$(totals | cut -d' ' -f2)" = "$(expected 777 | cut -d' ' -f2)" ]
+
+sleep 3
+check "the already-running dashboard picks up the flushed usage without a restart" \
+  [ "$(dashboard_out)" = "$(expected 777 | cut -d' ' -f2)" ]
 
 say "== pruning: delete that transcript inside the sandbox, as age-based cleanup would, and flush again"
 sbx exec "$PREFIX-0" rm -f /home/agent/.claude/projects/-work-demo/extra.jsonl
@@ -153,11 +166,6 @@ sbx exec "$PREFIX-0" sh -c 'ccusage sync run --config "$HOME/.local/state/ccusag
   && say "  ok    and the next sync has nothing to do" || { say "  FAIL  the next sync was not quiet"; FAILED=1; }
 
 say "== the host dashboard serves what the explorer needs"
-"$HUB" dashboard > "$WORK/dash.log" 2>&1 &
-DASH_PID=$!
-for _ in $(seq 1 20); do grep -q "http://127.0.0.1:" "$WORK/dash.log" && break; sleep 0.5; done
-DASH_URL="$(grep -o 'http://127.0.0.1:[0-9]*' "$WORK/dash.log" | head -1)"
-json() { curl -s "$DASH_URL/data/$1.json"; }
 check "machines.json names every sandbox by its label" \
   [ "$(json machines | python3 -c "import json,sys; m=json.load(sys.stdin)['machines']; print(sum(1 for x in m if x['label'].startswith('$PREFIX-')))")" = "$N" ]
 check "sessions.json has a session per sandbox" \
